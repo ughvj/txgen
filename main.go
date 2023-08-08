@@ -5,70 +5,91 @@ import (
 	"os"
 	"bufio"
 	"flag"
+	"encoding/csv"
+	"strings"
+	"strconv"
 )
 
 func main() {
-	addresses_filename := flag.String("addresses", "addresses.txt", "mail address list separated by CR/LF")
-	contents_filename := flag.String("contents", "contents.txt", "contents of mail body")
+	data_filename := flag.String("data", "data.csv", "mail address list separated by CR/LF")
+	template_filename := flag.String("template", "template.txt", "message template with place holder $N")
 	out_dir := flag.String("out", "out/", "directory path that output files located")
 	help := flag.Bool("help", false, "display help message")
 	flag.Parse()
 
 	//
 	if *help {
-		fmt.Println("-addresses: address list file path")
-		fmt.Println("-contents : contents file path")
-		fmt.Println("-out      : output dir (must attach separated character of dir at end of string)")
+		displayGuideMessage()
 		return
 	}
 
 	//
-	addresses_fp, err := os.Open(*addresses_filename)
+	data_fp, err := os.Open(*data_filename)
 	if err != nil {
-		fmt.Println("addresses file cannot be opened")
+		fmt.Println("ERROR: data file cannot be opened")
+		displayGuideMessage()
 		return
 	}
-	defer addresses_fp.Close()
+	defer data_fp.Close()
 
-	addresses_scanner := bufio.NewScanner(addresses_fp)
-	var addresses []string
-	for addresses_scanner.Scan() {
-		addresses = append (addresses, addresses_scanner.Text())
-	}
-
-	//
-	contents_fp, err := os.Open(*contents_filename)
+	reader := csv.NewReader(data_fp)
+	rows, err := reader.ReadAll()
 	if err != nil {
-		fmt.Println("contents file cannot be opened")
+		fmt.Println("ERROR: csv format is invalid")
 		return
-	}
-	defer contents_fp.Close()
-
-	contents_scanner := bufio.NewScanner(contents_fp)
-	var contents []string
-	for contents_scanner.Scan() {
-		contents = append (contents, contents_scanner.Text())
 	}
 
 	//
+	template_fp, err := os.Open(*template_filename)
+	if err != nil {
+		fmt.Println("ERROR: template file cannot be opened")
+		displayGuideMessage()
+		return
+	}
+	defer template_fp.Close()
+
+	template_scanner := bufio.NewScanner(template_fp)
+	serialized_template := ""
+	for template_scanner.Scan() {
+		serialized_template += template_scanner.Text() + "\n"
+	}
+
+	//
+	if (*out_dir)[len(*out_dir)-1:] != "/" {
+		*out_dir = *out_dir + "/"
+	}
+
 	if _, err := os.Stat(*out_dir); os.IsNotExist(err) {
-		if err := os.Mkdir(*out_dir, 0644); err != nil {
-        	fmt.Println(err)
+		if err := os.Mkdir(*out_dir, 0777); err != nil {
+			fmt.Println(err)
 			return
-    	}
+		}
 	}
 
 	//
-	for _, address := range addresses {
-		out_fp, err := os.Create(*out_dir + address + ".txt")
+	for _, row := range rows {
+		out_fp, err := os.Create(*out_dir + row[0] + ".txt")
 		if err != nil {
 			panic(err)
 		}
 		defer out_fp.Close()
-		for _, content := range contents {
-			out_fp.WriteString(content + "\n")
+
+		template_double := serialized_template
+		for i, e := range row {
+			if i == 0 {
+				continue
+			}
+			placeholder := "$" + strconv.Itoa(i)
+			template_double = strings.Replace(template_double, placeholder, e, 1)
 		}
+		out_fp.WriteString(template_double)
 	}
 
-	fmt.Println("generated", len(addresses), "files")
+	fmt.Println("generated", len(rows), "files")
+}
+
+func displayGuideMessage() {
+	fmt.Println(" -data     : default: [data.csv]     address and more (column 0 must be mail address)")
+	fmt.Println(" -template : default: [template.txt] template message")
+	fmt.Println(" -out      : default: [out/]         output dir")
 }
